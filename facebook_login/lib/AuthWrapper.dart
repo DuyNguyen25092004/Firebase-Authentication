@@ -1,57 +1,11 @@
-// main.dart
-import 'package:flutter/foundation.dart' show kIsWeb;
+// Thay thế class AuthWrapper trong main.dart bằng code này
+// hoặc tạo file riêng AuthWrapper.dart và import vào main.dart
+
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'HomePage.dart';
-import 'LoginPage.dart'; // Thêm import này
-
-// Cấu hình Firebase cho Web
-const firebaseConfig = FirebaseOptions(
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID",
-);
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  if (kIsWeb) {
-    await Firebase.initializeApp(options: firebaseConfig);
-  } else {
-    await Firebase.initializeApp();
-  }
-
-  runApp(MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Firebase Auth Demo',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          filled: true,
-          fillColor: Colors.grey[50],
-        ),
-      ),
-      home: AuthWrapper(),
-    );
-  }
-}
+import 'LoginPage.dart';
 
 class AuthWrapper extends StatefulWidget {
   @override
@@ -78,8 +32,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
           'age': null,
           'gender': null,
           'birthDate': null,
-          'isAdmin': false, // Mặc định không phải admin
-          'isActive': true, // Mặc định tài khoản hoạt động
+          'isAdmin': false,
+          'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         });
@@ -91,17 +45,14 @@ class _AuthWrapperState extends State<AuthWrapper> {
         Map<String, dynamic> updateData = {};
         final data = doc.data() as Map<String, dynamic>;
 
-        // Kiểm tra và thêm trường isAdmin nếu chưa có
         if (!data.containsKey('isAdmin')) {
           updateData['isAdmin'] = false;
         }
 
-        // Kiểm tra và thêm trường isActive nếu chưa có
         if (!data.containsKey('isActive')) {
           updateData['isActive'] = true;
         }
 
-        // Cập nhật nếu có trường cần thêm
         if (updateData.isNotEmpty) {
           updateData['updatedAt'] = FieldValue.serverTimestamp();
           await docRef.update(updateData);

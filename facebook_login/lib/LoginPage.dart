@@ -43,27 +43,25 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // Hàm xử lý liên kết tài khoản
-  Future<void> _handleAccountLinking(
-      AuthCredential pendingCredential, String email) async {
+  // Hàm xử lý liên kết tài khoản tự động
+  Future<UserCredential?> _handleAccountLinking(String email, AuthCredential pendingCredential) async {
     try {
       // Lấy danh sách phương thức đăng nhập cho email này
-      final signInMethods =
-      await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
+      final signInMethods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
 
       if (signInMethods.isEmpty) {
         // Không có tài khoản nào, đăng nhập bình thường
-        await FirebaseAuth.instance.signInWithCredential(pendingCredential);
-        return;
+        return await FirebaseAuth.instance.signInWithCredential(pendingCredential);
       }
 
       // Hiển thị dialog để người dùng chọn liên kết tài khoản
       final shouldLink = await showDialog<bool>(
         context: context,
+        barrierDismissible: false,
         builder: (context) => AlertDialog(
           title: Text('Tài khoản đã tồn tại'),
           content: Text(
-            'Email này đã được đăng ký bằng ${signInMethods.first}. '
+            'Email này đã được đăng ký bằng ${_getProviderName(signInMethods.first)}. '
                 'Bạn có muốn liên kết tài khoản không?',
           ),
           actions: [
@@ -79,30 +77,51 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
 
-      if (shouldLink != true) return;
+      if (shouldLink != true) return null;
 
-      // Đăng nhập bằng phương thức hiện tại
-      UserCredential? existingUser;
+      // Đăng nhập bằng phương thức hiện tại để lấy user credential
+      UserCredential? existingUserCredential;
 
       if (signInMethods.contains('google.com')) {
-        existingUser = await _signInWithGoogleForLinking();
+        existingUserCredential = await _signInWithGoogleForLinking();
       } else if (signInMethods.contains('facebook.com')) {
-        existingUser = await _signInWithFacebookForLinking();
+        existingUserCredential = await _signInWithFacebookForLinking();
       } else if (signInMethods.contains('password')) {
-        existingUser = await _signInWithPasswordForLinking(email);
+        existingUserCredential = await _signInWithPasswordForLinking(email);
       }
 
-      if (existingUser == null) {
+      if (existingUserCredential == null || existingUserCredential.user == null) {
         _showError('Không thể đăng nhập để liên kết tài khoản');
-        return;
+        return null;
       }
 
       // Liên kết credential mới vào tài khoản hiện tại
-      await existingUser.user!.linkWithCredential(pendingCredential);
-      _showSuccess('Liên kết tài khoản thành công!');
+      try {
+        await existingUserCredential.user!.linkWithCredential(pendingCredential);
+        _showSuccess('Liên kết tài khoản thành công!');
+        return existingUserCredential;
+      } catch (linkError) {
+        print('Link error: $linkError');
+        _showError('Lỗi liên kết: ${linkError.toString()}');
+        return existingUserCredential; // Vẫn trả về user hiện tại
+      }
     } catch (e) {
       print('Account linking error: $e');
       _showError('Lỗi liên kết tài khoản: ${e.toString()}');
+      return null;
+    }
+  }
+
+  String _getProviderName(String providerId) {
+    switch (providerId) {
+      case 'google.com':
+        return 'Google';
+      case 'facebook.com':
+        return 'Facebook';
+      case 'password':
+        return 'Email/Password';
+      default:
+        return providerId;
     }
   }
 
@@ -110,12 +129,15 @@ class _LoginPageState extends State<LoginPage> {
   Future<UserCredential?> _signInWithGoogleForLinking() async {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
+
+      // Sign out trước để có thể chọn tài khoản khác
+      await googleSignIn.signOut();
+
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
       if (googleUser == null) return null;
 
-      final GoogleSignInAuthentication googleAuth =
-      await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
@@ -132,6 +154,9 @@ class _LoginPageState extends State<LoginPage> {
   // Đăng nhập Facebook để liên kết
   Future<UserCredential?> _signInWithFacebookForLinking() async {
     try {
+      // Logout Facebook trước
+      await FacebookAuth.instance.logOut();
+
       final LoginResult result = await FacebookAuth.instance.login();
 
       if (result.status != LoginStatus.success) return null;
@@ -240,8 +265,7 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final GoogleSignInAuthentication googleAuth =
-      await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
@@ -251,17 +275,20 @@ class _LoginPageState extends State<LoginPage> {
       await FirebaseAuth.instance.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        // Xử lý trường hợp tài khoản đã tồn tại
+        print('Account exists with different credential');
         final email = e.email;
         final credential = e.credential;
 
         if (email != null && credential != null) {
-          await _handleAccountLinking(credential, email);
+          await _handleAccountLinking(email, credential);
+        } else {
+          _showError('Không thể liên kết tài khoản: Thiếu thông tin');
         }
       } else {
         _showError('Đăng nhập Google thất bại: ${e.message}');
       }
     } catch (e) {
+      print('Google sign in error: $e');
       _showError('Đăng nhập Google thất bại: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -286,17 +313,20 @@ class _LoginPageState extends State<LoginPage> {
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        // Xử lý trường hợp tài khoản đã tồn tại
+        print('Account exists with different credential');
         final email = e.email;
         final credential = e.credential;
 
         if (email != null && credential != null) {
-          await _handleAccountLinking(credential, email);
+          await _handleAccountLinking(email, credential);
+        } else {
+          _showError('Không thể liên kết tài khoản: Thiếu thông tin');
         }
       } else {
         _showError('Lỗi Facebook: ${e.message}');
       }
     } catch (e) {
+      print('Facebook sign in error: $e');
       _showError('Lỗi Facebook: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -439,8 +469,7 @@ class _LoginPageState extends State<LoginPage> {
                                 : Icons.visibility_off_outlined,
                           ),
                           onPressed: () {
-                            setState(
-                                    () => _obscurePassword = !_obscurePassword);
+                            setState(() => _obscurePassword = !_obscurePassword);
                           },
                         ),
                       ),
@@ -488,9 +517,7 @@ class _LoginPageState extends State<LoginPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          _isLogin
-                              ? 'Chưa có tài khoản? '
-                              : 'Đã có tài khoản? ',
+                          _isLogin ? 'Chưa có tài khoản? ' : 'Đã có tài khoản? ',
                           style: TextStyle(color: Colors.grey[600]),
                         ),
                         TextButton(

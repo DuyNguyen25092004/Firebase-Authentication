@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'AdminManagementPage.dart'; // Import file AdminManagementPage
 
 class HomePage extends StatefulWidget {
   @override
@@ -13,6 +14,7 @@ class _HomePageState extends State<HomePage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
+  bool _isAdmin = false;
 
   @override
   void initState() {
@@ -38,6 +40,8 @@ class _HomePageState extends State<HomePage> {
             'age': null,
             'gender': null,
             'birthDate': null,
+            'isAdmin': false, // Mặc định không phải admin
+            'isActive': true, // Mặc định tài khoản hoạt động
             'createdAt': FieldValue.serverTimestamp(),
             'updatedAt': FieldValue.serverTimestamp(),
           };
@@ -47,12 +51,15 @@ class _HomePageState extends State<HomePage> {
 
           setState(() {
             _userData = initialData;
+            _isAdmin = false;
             _isLoading = false;
           });
         } else {
           print('User document exists');
+          final data = doc.data();
           setState(() {
-            _userData = doc.data();
+            _userData = data;
+            _isAdmin = data?['isAdmin'] == true;
             _isLoading = false;
           });
         }
@@ -140,6 +147,20 @@ class _HomePageState extends State<HomePage> {
           },
         ),
         actions: [
+          // Hiển thị nút quản lý admin nếu là admin
+          if (_isAdmin)
+            IconButton(
+              icon: Icon(Icons.admin_panel_settings),
+              tooltip: 'Quản lý người dùng',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AdminManagementPage(),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: Icon(Icons.logout),
             tooltip: 'Đăng xuất',
@@ -175,13 +196,13 @@ class _HomePageState extends State<HomePage> {
                     Container(
                       padding: EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: _isAdmin ? Colors.orange.shade50 : Colors.green.shade50,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.person,
+                        _isAdmin ? Icons.admin_panel_settings : Icons.person,
                         size: 80,
-                        color: Colors.green,
+                        color: _isAdmin ? Colors.orange : Colors.green,
                       ),
                     ),
                   SizedBox(height: 32),
@@ -194,6 +215,30 @@ class _HomePageState extends State<HomePage> {
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  if (_isAdmin) ...[
+                    SizedBox(height: 8),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.admin_panel_settings, color: Colors.white, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Quản trị viên',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   SizedBox(height: 16),
                   Card(
                     elevation: 2,
@@ -247,6 +292,33 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   SizedBox(height: 24),
+
+                  // Nút Quản lý người dùng (chỉ hiển thị cho admin)
+                  if (_isAdmin)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => AdminManagementPage(),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.admin_panel_settings),
+                      label: Text('Quản lý người dùng'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(
+                            horizontal: 40, vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+
+                  if (_isAdmin) SizedBox(height: 16),
+
                   ElevatedButton.icon(
                     onPressed: () async {
                       final result = await Navigator.push(
@@ -327,6 +399,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+// EditProfilePage class giữ nguyên như cũ
 class EditProfilePage extends StatefulWidget {
   final Map<String, dynamic> userData;
 
