@@ -38,7 +38,7 @@ dependencies:
   firebase_storage: ^12.3.0     # nếu có
 
   # Social login
-  flutter_facebook_auth: ^7.1.2
+  flutter_facebook_auth: ^6.0.3
   google_sign_in: ^6.1.6
   # bản mới nhất tương thích
 
