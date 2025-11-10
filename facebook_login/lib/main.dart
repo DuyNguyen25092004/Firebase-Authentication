@@ -7,7 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'HomePage.dart';
-import 'LoginPage.dart'; // Thêm import này
+import 'LoginPage.dart';
 
 // Cấu hình Firebase cho Web
 const firebaseConfig = FirebaseOptions(
@@ -138,6 +138,20 @@ class _AuthWrapperState extends State<AuthWrapper> {
     }
   }
 
+  // Kiểm tra xem provider có yêu cầu xác thực email không
+  bool _requiresEmailVerification(User user) {
+    // Chỉ yêu cầu xác thực email cho tài khoản đăng ký bằng email/password
+    final providerIds = user.providerData.map((e) => e.providerId).toList();
+
+    // Nếu user đăng nhập bằng Google hoặc Facebook, không cần xác thực
+    if (providerIds.contains('google.com') || providerIds.contains('facebook.com')) {
+      return false;
+    }
+
+    // Nếu đăng nhập bằng email/password, cần xác thực
+    return providerIds.contains('password');
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -151,6 +165,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
+
+          // Kiểm tra xem có cần xác thực email không
+          if (_requiresEmailVerification(user) && !user.emailVerified) {
+            return _buildEmailVerificationScreen(user);
+          }
 
           return FutureBuilder<bool>(
             future: Future.wait([
@@ -176,6 +195,165 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         return LoginPage();
       },
+    );
+  }
+
+  Widget _buildEmailVerificationScreen(User user) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.blue.shade50, Colors.white],
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              constraints: BoxConstraints(maxWidth: 500),
+              padding: EdgeInsets.all(32),
+              child: Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.mark_email_unread,
+                        size: 80,
+                        color: Colors.blue,
+                      ),
+                      SizedBox(height: 24),
+                      Text(
+                        'Xác thực email của bạn',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[800],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'Chúng tôi đã gửi một email xác thực đến:',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        user.email ?? '',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'Vui lòng kiểm tra hộp thư đến (và cả thư mục spam) của bạn và nhấn vào link xác thực để tiếp tục.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[600],
+                          height: 1.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 32),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          await user.reload();
+                          final currentUser = FirebaseAuth.instance.currentUser;
+
+                          if (currentUser != null && currentUser.emailVerified) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Email đã được xác thực thành công!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                            // Trigger rebuild để vào HomePage
+                            setState(() {});
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Email chưa được xác thực. Vui lòng kiểm tra email.'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                          }
+                        },
+                        icon: Icon(Icons.refresh),
+                        label: Text('Tôi đã xác thực'),
+                        style: ElevatedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            await user.sendEmailVerification();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Đã gửi lại email xác thực'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          } catch (e) {
+                            String message = 'Lỗi gửi email';
+                            if (e.toString().contains('too-many-requests')) {
+                              message = 'Vui lòng đợi một chút trước khi gửi lại';
+                            }
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(message),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        },
+                        icon: Icon(Icons.send),
+                        label: Text('Gửi lại email'),
+                        style: OutlinedButton.styleFrom(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                        },
+                        child: Text('Đăng xuất'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
