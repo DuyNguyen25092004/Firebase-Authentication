@@ -1,7 +1,8 @@
-import 'package:flutter/material.dart' ;
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+
 class LoginPage extends StatefulWidget {
   @override
   _LoginPageState createState() => _LoginPageState();
@@ -30,6 +31,161 @@ class _LoginPageState extends State<LoginPage> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // Hàm xử lý liên kết tài khoản
+  Future<void> _handleAccountLinking(
+      AuthCredential pendingCredential, String email) async {
+    try {
+      // Lấy danh sách phương thức đăng nhập cho email này
+      final signInMethods =
+      await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
+
+      if (signInMethods.isEmpty) {
+        // Không có tài khoản nào, đăng nhập bình thường
+        await FirebaseAuth.instance.signInWithCredential(pendingCredential);
+        return;
+      }
+
+      // Hiển thị dialog để người dùng chọn liên kết tài khoản
+      final shouldLink = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Tài khoản đã tồn tại'),
+          content: Text(
+            'Email này đã được đăng ký bằng ${signInMethods.first}. '
+                'Bạn có muốn liên kết tài khoản không?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Liên kết'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldLink != true) return;
+
+      // Đăng nhập bằng phương thức hiện tại
+      UserCredential? existingUser;
+
+      if (signInMethods.contains('google.com')) {
+        existingUser = await _signInWithGoogleForLinking();
+      } else if (signInMethods.contains('facebook.com')) {
+        existingUser = await _signInWithFacebookForLinking();
+      } else if (signInMethods.contains('password')) {
+        existingUser = await _signInWithPasswordForLinking(email);
+      }
+
+      if (existingUser == null) {
+        _showError('Không thể đăng nhập để liên kết tài khoản');
+        return;
+      }
+
+      // Liên kết credential mới vào tài khoản hiện tại
+      await existingUser.user!.linkWithCredential(pendingCredential);
+      _showSuccess('Liên kết tài khoản thành công!');
+    } catch (e) {
+      print('Account linking error: $e');
+      _showError('Lỗi liên kết tài khoản: ${e.toString()}');
+    }
+  }
+
+  // Đăng nhập Google để liên kết
+  Future<UserCredential?> _signInWithGoogleForLinking() async {
+    try {
+      final GoogleSignIn googleSignIn = GoogleSignIn();
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) return null;
+
+      final GoogleSignInAuthentication googleAuth =
+      await googleUser.authentication;
+
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      return await FirebaseAuth.instance.signInWithCredential(credential);
+    } catch (e) {
+      print('Google sign in for linking error: $e');
+      return null;
+    }
+  }
+
+  // Đăng nhập Facebook để liên kết
+  Future<UserCredential?> _signInWithFacebookForLinking() async {
+    try {
+      final LoginResult result = await FacebookAuth.instance.login();
+
+      if (result.status != LoginStatus.success) return null;
+
+      final OAuthCredential credential =
+      FacebookAuthProvider.credential(result.accessToken!.tokenString);
+
+      return await FirebaseAuth.instance.signInWithCredential(credential);
+    } catch (e) {
+      print('Facebook sign in for linking error: $e');
+      return null;
+    }
+  }
+
+  // Đăng nhập bằng mật khẩu để liên kết
+  Future<UserCredential?> _signInWithPasswordForLinking(String email) async {
+    final passwordController = TextEditingController();
+
+    final password = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Nhập mật khẩu'),
+        content: TextField(
+          controller: passwordController,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: 'Mật khẩu',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Hủy'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, passwordController.text),
+            child: Text('Xác nhận'),
+          ),
+        ],
+      ),
+    );
+
+    if (password == null || password.isEmpty) return null;
+
+    try {
+      return await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } catch (e) {
+      _showError('Mật khẩu không đúng');
+      return null;
+    }
   }
 
   Future<void> _signInWithEmail() async {
@@ -93,6 +249,18 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       await FirebaseAuth.instance.signInWithCredential(credential);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'account-exists-with-different-credential') {
+        // Xử lý trường hợp tài khoản đã tồn tại
+        final email = e.email;
+        final credential = e.credential;
+
+        if (email != null && credential != null) {
+          await _handleAccountLinking(credential, email);
+        }
+      } else {
+        _showError('Đăng nhập Google thất bại: ${e.message}');
+      }
     } catch (e) {
       _showError('Đăng nhập Google thất bại: ${e.toString()}');
     } finally {
@@ -115,6 +283,18 @@ class _LoginPageState extends State<LoginPage> {
         _showError('Đăng nhập Facebook bị hủy');
       } else {
         _showError('Đăng nhập Facebook thất bại');
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'account-exists-with-different-credential') {
+        // Xử lý trường hợp tài khoản đã tồn tại
+        final email = e.email;
+        final credential = e.credential;
+
+        if (email != null && credential != null) {
+          await _handleAccountLinking(credential, email);
+        }
+      } else {
+        _showError('Lỗi Facebook: ${e.message}');
       }
     } catch (e) {
       _showError('Lỗi Facebook: ${e.toString()}');
@@ -259,7 +439,8 @@ class _LoginPageState extends State<LoginPage> {
                                 : Icons.visibility_off_outlined,
                           ),
                           onPressed: () {
-                            setState(() => _obscurePassword = !_obscurePassword);
+                            setState(
+                                    () => _obscurePassword = !_obscurePassword);
                           },
                         ),
                       ),
@@ -269,7 +450,7 @@ class _LoginPageState extends State<LoginPage> {
                           return 'Vui lòng nhập mật khẩu';
                         }
                         if (value.length < 6) {
-                          return 'Mật khẩu phải có ít nhất 6 ký tự, bao gồm chữ cái viết hoa và ký tự đặc biệt';
+                          return 'Mật khẩu phải có ít nhất 6 ký tự';
                         }
                         return null;
                       },
@@ -307,7 +488,9 @@ class _LoginPageState extends State<LoginPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          _isLogin ? 'Chưa có tài khoản? ' : 'Đã có tài khoản? ',
+                          _isLogin
+                              ? 'Chưa có tài khoản? '
+                              : 'Đã có tài khoản? ',
                           style: TextStyle(color: Colors.grey[600]),
                         ),
                         TextButton(
