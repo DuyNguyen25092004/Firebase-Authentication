@@ -55,74 +55,110 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // // Hàm xử lý liên kết tài khoản tự động
-  // Future<UserCredential?> _handleAccountLinking(String email, AuthCredential pendingCredential) async {
-  //   try {
-  //     // Lấy danh sách phương thức đăng nhập cho email này
-  //     final signInMethods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
-  //
-  //     if (signInMethods.isEmpty) {
-  //       // Không có tài khoản nào, đăng nhập bình thường
-  //       return await FirebaseAuth.instance.signInWithCredential(pendingCredential);
-  //     }
-  //
-  //     // Hiển thị dialog để người dùng chọn liên kết tài khoản
-  //     final shouldLink = await showDialog<bool>(
-  //       context: context,
-  //       barrierDismissible: false,
-  //       builder: (context) => AlertDialog(
-  //         title: Text('Tài khoản đã tồn tại'),
-  //         content: Text(
-  //           'Email này đã được đăng ký bằng ${_getProviderName(signInMethods.first)}. '
-  //               'Bạn có muốn liên kết tài khoản không?',
-  //         ),
-  //         actions: [
-  //           TextButton(
-  //             onPressed: () => Navigator.pop(context, false),
-  //             child: Text('Hủy'),
-  //           ),
-  //           ElevatedButton(
-  //             onPressed: () => Navigator.pop(context, true),
-  //             child: Text('Liên kết'),
-  //           ),
-  //         ],
-  //       ),
-  //     );
-  //
-  //     if (shouldLink != true) return null;
-  //
-  //     // Đăng nhập bằng phương thức hiện tại để lấy user credential
-  //     UserCredential? existingUserCredential;
-  //
-  //     if (signInMethods.contains('google.com')) {
-  //       existingUserCredential = await _signInWithGoogleForLinking();
-  //     } else if (signInMethods.contains('facebook.com')) {
-  //       existingUserCredential = await _signInWithFacebookForLinking();
-  //     } else if (signInMethods.contains('password')) {
-  //       existingUserCredential = await _signInWithPasswordForLinking(email);
-  //     }
-  //
-  //     if (existingUserCredential == null || existingUserCredential.user == null) {
-  //       _showError('Không thể đăng nhập để liên kết tài khoản');
-  //       return null;
-  //     }
-  //
-  //     // Liên kết credential mới vào tài khoản hiện tại
-  //     try {
-  //       await existingUserCredential.user!.linkWithCredential(pendingCredential);
-  //       _showSuccess('Liên kết tài khoản thành công!');
-  //       return existingUserCredential;
-  //     } catch (linkError) {
-  //       print('Link error: $linkError');
-  //       _showError('Lỗi liên kết: ${linkError.toString()}');
-  //       return existingUserCredential; // Vẫn trả về user hiện tại
-  //     }
-  //   } catch (e) {
-  //     print('Account linking error: $e');
-  //     _showError('Lỗi liên kết tài khoản: ${e.toString()}');
-  //     return null;
-  //   }
-  // }
+  // Hàm xử lý quên mật khẩu
+  Future<void> _showForgotPasswordDialog() async {
+    final emailController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Quên mật khẩu'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Nhập email của bạn để nhận link đặt lại mật khẩu',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+              SizedBox(height: 16),
+              TextFormField(
+                controller: emailController,
+                decoration: InputDecoration(
+                  labelText: 'Email',
+                  hintText: 'example@email.com',
+                  prefixIcon: Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Vui lòng nhập email';
+                  }
+                  if (!value.contains('@')) {
+                    return 'Email không hợp lệ';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Hủy'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(context, true);
+              }
+            },
+            child: Text('Gửi'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      await _sendPasswordResetEmail(emailController.text.trim());
+    }
+
+    emailController.dispose();
+  }
+  // Hàm gửi email đặt lại mật khẩu
+  Future<void> _sendPasswordResetEmail(String email) async {
+
+    try {
+
+
+      // Gửi email đặt lại mật khẩu
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+
+      _showDialog(
+        title: 'Email đã được gửi',
+        content: 'Chúng tôi đã gửi link đặt lại mật khẩu đến $email.\n\n'
+            'Vui lòng kiểm tra hộp thư đến (và cả thư mục spam) và nhấn vào link để đặt lại mật khẩu của bạn.\n\n'
+            'Link sẽ hết hạn sau 1 giờ.',
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Đã hiểu'),
+          ),
+        ],
+      );
+    } on FirebaseAuthException catch (e) {
+      String message = 'Đã xảy ra lỗi';
+
+      if (e.code == 'user-not-found') {
+        message = 'Email này chưa được đăng ký';
+      } else if (e.code == 'invalid-email') {
+        message = 'Email không hợp lệ';
+      } else if (e.code == 'too-many-requests') {
+        message = 'Quá nhiều yêu cầu. Vui lòng thử lại sau';
+      }
+
+      _showError(message);
+    } catch (e) {
+      _showError('Lỗi gửi email: ${e.toString()}');
+    }
+  }
 
   String _getProviderName(String providerId) {
     switch (providerId) {
@@ -141,21 +177,14 @@ class _LoginPageState extends State<LoginPage> {
   Future<UserCredential?> _signInWithGoogleForLinking() async {
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn();
-
-      // Sign out trước để có thể chọn tài khoản khác
       await googleSignIn.signOut();
-
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-
       if (googleUser == null) return null;
-
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
-
       return await FirebaseAuth.instance.signInWithCredential(credential);
     } catch (e) {
       print('Google sign in for linking error: $e');
@@ -166,16 +195,11 @@ class _LoginPageState extends State<LoginPage> {
   // Đăng nhập Facebook để liên kết
   Future<UserCredential?> _signInWithFacebookForLinking() async {
     try {
-      // Logout Facebook trước
       await FacebookAuth.instance.logOut();
-
       final LoginResult result = await FacebookAuth.instance.login();
-
       if (result.status != LoginStatus.success) return null;
-
       final OAuthCredential credential =
       FacebookAuthProvider.credential(result.accessToken!.token);
-
       return await FirebaseAuth.instance.signInWithCredential(credential);
     } catch (e) {
       print('Facebook sign in for linking error: $e');
@@ -374,85 +398,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  // Future<void> _signInWithGoogle() async {
-  //   setState(() => _isLoading = true);
-  //
-  //   try {
-  //     final GoogleSignIn googleSignIn = GoogleSignIn();
-  //     final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-  //
-  //     if (googleUser == null) {
-  //       setState(() => _isLoading = false);
-  //       return;
-  //     }
-  //
-  //     final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-  //
-  //     final credential = GoogleAuthProvider.credential(
-  //       accessToken: googleAuth.accessToken,
-  //       idToken: googleAuth.idToken,
-  //     );
-  //
-  //     await FirebaseAuth.instance.signInWithCredential(credential);
-  //   } on FirebaseAuthException catch (e) {
-  //     if (e.code == 'account-exists-with-different-credential') {
-  //       print('Account exists with different credential');
-  //       final email = e.email;
-  //       final credential = e.credential;
-  //
-  //       if (email != null && credential != null) {
-  //         await _handleAccountLinking(email, credential);
-  //       } else {
-  //         _showError('Không thể liên kết tài khoản: Thiếu thông tin');
-  //       }
-  //     } else {
-  //       _showError('Đăng nhập Google thất bại: ${e.message}');
-  //     }
-  //   } catch (e) {
-  //     print('Google sign in error: $e');
-  //     _showError('Đăng nhập Google thất bại: ${e.toString()}');
-  //   } finally {
-  //     if (mounted) setState(() => _isLoading = false);
-  //   }
-  // }
-  //
-  // Future<void> _signInWithFacebook() async {
-  //   setState(() => _isLoading = true);
-  //
-  //   try {
-  //     final LoginResult result = await FacebookAuth.instance.login();
-  //
-  //     if (result.status == LoginStatus.success) {
-  //       final OAuthCredential credential =
-  //       FacebookAuthProvider.credential(result.accessToken!.tokenString);
-  //
-  //       await FirebaseAuth.instance.signInWithCredential(credential);
-  //     } else if (result.status == LoginStatus.cancelled) {
-  //       _showError('Đăng nhập Facebook bị hủy');
-  //     } else {
-  //       _showError('Đăng nhập Facebook thất bại');
-  //     }
-  //   } on FirebaseAuthException catch (e) {
-  //     if (e.code == 'account-exists-with-different-credential') {
-  //       print('Account exists with different credential');
-  //       final email = e.email;
-  //       final credential = e.credential;
-  //
-  //       if (email != null && credential != null) {
-  //         await _handleAccountLinking(email, credential);
-  //       } else {
-  //         _showError('Không thể liên kết tài khoản: Thiếu thông tin');
-  //       }
-  //     } else {
-  //       _showError('Lỗi Facebook: ${e.message}');
-  //     }
-  //   } catch (e) {
-  //     print('Facebook sign in error: $e');
-  //     _showError('Lỗi Facebook: ${e.toString()}');
-  //   } finally {
-  //     if (mounted) setState(() => _isLoading = false);
-  //   }
-  // }
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
 
@@ -476,7 +421,6 @@ class _LoginPageState extends State<LoginPage> {
       await FirebaseAuth.instance.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        // Xử lý xung đột tài khoản
         await _handleAccountConflict(e, GoogleAuthProvider.credential(
           accessToken: (await (await GoogleSignIn().signIn())?.authentication)?.accessToken,
           idToken: (await (await GoogleSignIn().signIn())?.authentication)?.idToken,
@@ -509,7 +453,6 @@ class _LoginPageState extends State<LoginPage> {
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        // Xử lý xung đột tài khoản
         final AccessToken? accessToken = await FacebookAuth.instance.accessToken;
         if (accessToken != null) {
           await _handleAccountConflict(
@@ -527,7 +470,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-// Hàm xử lý xung đột tài khoản - thêm vào class
+  // Hàm xử lý xung đột tài khoản
   Future<void> _handleAccountConflict(
       FirebaseAuthException exception,
       AuthCredential? pendingCredential,
@@ -539,7 +482,6 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // Lấy danh sách phương thức đăng nhập đã có
       final signInMethods =
       await FirebaseAuth.instance.fetchSignInMethodsForEmail(email);
 
@@ -548,7 +490,6 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // Hiển thị dialog cho người dùng
       final provider =
       signInMethods.first.contains('google') ? 'Google' : 'Facebook';
 
@@ -575,7 +516,6 @@ class _LoginPageState extends State<LoginPage> {
 
       if (shouldLink != true || pendingCredential == null) return;
 
-      // Đăng nhập lại bằng phương thức đã có
       UserCredential? existingUserCredential;
 
       if (signInMethods.contains('google.com')) {
@@ -606,7 +546,6 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
-      // Liên kết credential mới
       if (existingUserCredential != null) {
         await existingUserCredential.user!.linkWithCredential(pendingCredential);
 
@@ -631,6 +570,7 @@ class _LoginPageState extends State<LoginPage> {
       _showError('Lỗi: ${e.toString()}');
     }
   }
+
   @override
   Widget build(BuildContext context) {
     // Nếu đang chờ xác thực email, hiển thị màn hình chờ
@@ -880,6 +820,25 @@ class _LoginPageState extends State<LoginPage> {
                         return null;
                       },
                     ),
+
+                    // Nút Quên mật khẩu (chỉ hiển thị khi đang ở chế độ đăng nhập)
+                    if (_isLogin) ...[
+                      SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _isLoading ? null : _showForgotPasswordDialog,
+                          child: Text(
+                            'Quên mật khẩu?',
+                            style: TextStyle(
+                              color: Colors.blue,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+
                     SizedBox(height: 24),
                     ElevatedButton(
                       onPressed: _isLoading ? null : _signInWithEmail,
