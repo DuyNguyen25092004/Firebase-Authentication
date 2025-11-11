@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
-
+AuthCredential? _pendingCredential;
 class LoginPage extends StatefulWidget {
   @override
   _LoginPageState createState() => _LoginPageState();
@@ -421,10 +421,9 @@ class _LoginPageState extends State<LoginPage> {
       await FirebaseAuth.instance.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        await _handleAccountConflict(e, GoogleAuthProvider.credential(
-          accessToken: (await (await GoogleSignIn().signIn())?.authentication)?.accessToken,
-          idToken: (await (await GoogleSignIn().signIn())?.authentication)?.idToken,
-        ));
+        // Lưu credential để dùng sau
+        _pendingCredential = e.credential;
+        await _handleAccountConflict(e, _pendingCredential);
       } else {
         _showError('Đăng nhập Google thất bại: ${e.toString()}');
       }
@@ -435,6 +434,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+// HÀM 2: Fix _signInWithFacebook
   Future<void> _signInWithFacebook() async {
     setState(() => _isLoading = true);
 
@@ -453,13 +453,9 @@ class _LoginPageState extends State<LoginPage> {
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'account-exists-with-different-credential') {
-        final AccessToken? accessToken = await FacebookAuth.instance.accessToken;
-        if (accessToken != null) {
-          await _handleAccountConflict(
-            e,
-            FacebookAuthProvider.credential(accessToken.token),
-          );
-        }
+        // Lưu credential để dùng sau
+        _pendingCredential = e.credential;
+        await _handleAccountConflict(e, _pendingCredential);
       } else {
         _showError('Lỗi Facebook: ${e.toString()}');
       }
@@ -470,7 +466,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // Hàm xử lý xung đột tài khoản
+// HÀM 3: Fix _handleAccountConflict
   Future<void> _handleAccountConflict(
       FirebaseAuthException exception,
       AuthCredential? pendingCredential,
@@ -490,15 +486,22 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final provider =
-      signInMethods.first.contains('google') ? 'Google' : 'Facebook';
+      // Xác định provider đã tồn tại
+      String existingProvider = 'không xác định';
+      if (signInMethods.contains('google.com')) {
+        existingProvider = 'Google';
+      } else if (signInMethods.contains('facebook.com')) {
+        existingProvider = 'Facebook';
+      } else if (signInMethods.contains('password')) {
+        existingProvider = 'Email/Password';
+      }
 
       final shouldLink = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Tài khoản đã tồn tại'),
           content: Text(
-            'Email "$email" đã được đăng ký bằng $provider.\n\n'
+            'Email "$email" đã được đăng ký bằng $existingProvider.\n\n'
                 'Bạn có muốn liên kết các phương thức đăng nhập không?',
           ),
           actions: [
@@ -514,49 +517,44 @@ class _LoginPageState extends State<LoginPage> {
         ),
       );
 
-      if (shouldLink != true || pendingCredential == null) return;
+      if (shouldLink != true) return;
 
+      // Đăng nhập lại bằng phương thức đã có
       UserCredential? existingUserCredential;
 
       if (signInMethods.contains('google.com')) {
-        final GoogleSignIn googleSignIn = GoogleSignIn();
-        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-        if (googleUser == null) return;
-
-        final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
-
-        final googleCredential = GoogleAuthProvider.credential(
-          accessToken: googleAuth.accessToken,
-          idToken: googleAuth.idToken,
-        );
-
-        existingUserCredential =
-        await FirebaseAuth.instance.signInWithCredential(googleCredential);
+        existingUserCredential = await _signInWithGoogleForLinking();
       } else if (signInMethods.contains('facebook.com')) {
-        final LoginResult result = await FacebookAuth.instance.login();
-
-        if (result.status == LoginStatus.success) {
-          final facebookCredential = FacebookAuthProvider.credential(
-            result.accessToken!.token,
-          );
-
-          existingUserCredential = await FirebaseAuth.instance
-              .signInWithCredential(facebookCredential);
-        }
+        existingUserCredential = await _signInWithFacebookForLinking();
+      } else if (signInMethods.contains('password')) {
+        existingUserCredential = await _signInWithPasswordForLinking(email);
       }
 
-      if (existingUserCredential != null) {
-        await existingUserCredential.user!.linkWithCredential(pendingCredential);
+      // Liên kết credential mới
+      if (existingUserCredential != null && pendingCredential != null) {
+        try {
+          await existingUserCredential.user!.linkWithCredential(pendingCredential);
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Đã liên kết tài khoản thành công!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Đã liên kết tài khoản thành công!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } on FirebaseAuthException catch (linkError) {
+          if (linkError.code == 'provider-already-linked') {
+            // Nếu đã liên kết rồi thì bỏ qua lỗi này
+            if (mounted) {
+              _showSuccess('Tài khoản đã được liên kết trước đó');
+            }
+          } else {
+            rethrow;
+          }
         }
+      } else {
+        _showError('Không thể liên kết tài khoản');
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'credential-already-in-use') {
